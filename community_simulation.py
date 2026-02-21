@@ -1,14 +1,13 @@
 """
-Oasis Agent 社区 - 合并版
+Oasis Agent 社区
 
 支持：
-1) 本地 vLLM + Qwen 模型
-2) 外部 LLM API (OpenAI / DeepSeek / Qwen 等 OpenAI 兼容 API)
-3) Twitter / Reddit 平台选择
-4) 有限轮次模式 (--rounds N)
-5) 持续运行模式 (--continuous)：不断抽取话题 + Agent 自主互动
-6) 个性化推荐 (--personalized-recsys)
-7) PsySafe 恶意 Agent 注入 (--dark-agents N)
+1) 外部 LLM API (OpenAI / DeepSeek / Qwen 等 OpenAI 兼容 API)
+2) Twitter / Reddit 平台选择
+3) 有限轮次模式 (--rounds N)
+4) 持续运行模式 (--continuous)：不断抽取话题 + Agent 自主互动
+5) 个性化推荐 (--personalized-recsys)
+6) PsySafe 恶意 Agent 注入 (--dark-agents N)
 """
 
 import argparse
@@ -21,6 +20,13 @@ import sys
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
+
+# 从 .env 文件加载环境变量（如果存在）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except ImportError:
+    pass
 
 
 # ── 日志系统 ──
@@ -118,12 +124,6 @@ def setup_logging(log_dir: str = "") -> str:
     return log_path
 
 
-DEFAULT_MODEL_RELATIVE = os.path.join(
-    os.path.dirname(__file__), "models", "Qwen3-4B-Instruct-2507"
-)
-DEFAULT_MODEL_FALLBACK = "/mnt/shared-storage-user/qianchen1/models/Qwen3-4B-Instruct-2507"
-
-
 AGENT_CONFIGS: List[Dict[str, str]] = [
     {"user_name": "tech_explorer", "name": "Alice",
      "description": "科技爱好者，喜欢探索新技术", "persona": "对AI和新技术充满热情"},
@@ -173,21 +173,6 @@ class DummyTokenCounter:
         return 0
 
 
-def resolve_model_path(explicit_path: Optional[str]) -> str:
-    candidates: List[str] = []
-    if explicit_path:
-        candidates.append(explicit_path)
-    env_path = os.environ.get("OASIS_MODEL_PATH", "").strip()
-    if env_path:
-        candidates.append(env_path)
-    candidates.append(DEFAULT_MODEL_RELATIVE)
-    candidates.append(DEFAULT_MODEL_FALLBACK)
-    for path in candidates:
-        if path and os.path.exists(path):
-            return path
-    return candidates[0] if candidates else ""
-
-
 def build_agent_configs(num_agents: int, use_simple_roles: bool) -> List[Dict[str, str]]:
     configs: List[Dict[str, str]] = []
     if use_simple_roles:
@@ -214,29 +199,7 @@ def build_agent_configs(num_agents: int, use_simple_roles: bool) -> List[Dict[st
     return configs
 
 
-def print_vllm_command(model_path: str, api_url: str, max_model_len: int, gpu_mem_util: float) -> None:
-    host, port = "0.0.0.0", "8000"
-    if api_url.startswith("http://") or api_url.startswith("https://"):
-        try:
-            host_port = api_url.split("://", 1)[1].split("/", 1)[0]
-            if ":" in host_port:
-                host, port = host_port.split(":", 1)
-        except Exception:
-            pass
-    print("\n📦 推荐 vLLM 启动命令：")
-    print("python -m vllm.entrypoints.openai.api_server \\")
-    print(f"  --model {model_path} \\")
-    print(f"  --host {host} \\")
-    print(f"  --port {port} \\")
-    print("  --trust-remote-code \\")
-    print("  --enable-auto-tool-choice \\")
-    print("  --tool-call-parser hermes \\")
-    print(f"  --max-model-len {max_model_len} \\")
-    print(f"  --gpu-memory-utilization {gpu_mem_util}")
-
-
 PLATFORM_TYPE_MAP = {
-    "vllm": "VLLM",
     "openai": "OPENAI",
     "deepseek": "DEEPSEEK",
     "qwen": "QWEN",
@@ -245,12 +208,12 @@ PLATFORM_TYPE_MAP = {
 
 
 async def create_model(model_type: str, api_url: str, temperature: float,
-                       platform_type: str = "vllm", api_key: str = "EMPTY"):
+                       platform_type: str = "openai-compatible", api_key: str = "EMPTY"):
     from camel.models import ModelFactory
     from camel.types import ModelPlatformType
 
-    platform_name = PLATFORM_TYPE_MAP.get(platform_type, "VLLM")
-    model_platform = getattr(ModelPlatformType, platform_name, ModelPlatformType.VLLM)
+    platform_name = PLATFORM_TYPE_MAP.get(platform_type, "OPENAI_COMPATIBLE_MODEL")
+    model_platform = getattr(ModelPlatformType, platform_name, ModelPlatformType.OPENAI_COMPATIBLE_MODEL)
 
     create_kwargs = dict(
         model_platform=model_platform,
@@ -265,69 +228,6 @@ async def create_model(model_type: str, api_url: str, temperature: float,
     model = ModelFactory.create(**create_kwargs)
     model._token_counter = DummyTokenCounter()
     return model
-
-
-def apply_offline_patches(oasis_module, use_personalized_recsys: bool = False):
-    """推荐系统补丁 — 将所有 HuggingFace 远程模型加载重定向到本地路径。
-
-    本地模型目录：models/
-    - Twitter/twhin-bert-base  → models/twhin-bert-base
-    - paraphrase-MiniLM-L6-v2 → models/paraphrase-MiniLM-L6-v2
-    """
-    import oasis.social_platform.recsys as _recsys_mod
-
-    models_dir = os.path.join(os.path.dirname(__file__), "models")
-    local_twhin = os.path.join(models_dir, "twhin-bert-base")
-    local_minilm = os.path.join(models_dir, "paraphrase-MiniLM-L6-v2")
-
-    # 1) 拦截 get_twhin_tokenizer — 从本地加载
-    _orig_get_tokenizer = _recsys_mod.get_twhin_tokenizer
-
-    def patched_get_twhin_tokenizer():
-        if os.path.exists(local_twhin):
-            if _recsys_mod.twhin_tokenizer is None:
-                from transformers import AutoTokenizer
-                print(f"📦 [补丁] twhin tokenizer → 本地: {local_twhin}")
-                _recsys_mod.twhin_tokenizer = AutoTokenizer.from_pretrained(
-                    local_twhin, model_max_length=512)
-            return _recsys_mod.twhin_tokenizer
-        return _orig_get_tokenizer()
-
-    _recsys_mod.get_twhin_tokenizer = patched_get_twhin_tokenizer
-
-    # 2) 拦截 get_twhin_model — 从本地加载
-    _orig_get_model = _recsys_mod.get_twhin_model
-
-    def patched_get_twhin_model(device):
-        if os.path.exists(local_twhin):
-            if _recsys_mod.twhin_model is None:
-                from transformers import AutoModel
-                print(f"📦 [补丁] twhin model → 本地: {local_twhin}")
-                _recsys_mod.twhin_model = AutoModel.from_pretrained(local_twhin).to(device)
-            return _recsys_mod.twhin_model
-        return _orig_get_model(device)
-
-    _recsys_mod.get_twhin_model = patched_get_twhin_model
-
-    # 3) 拦截 load_model — paraphrase-MiniLM 也走本地
-    _orig_load_model = _recsys_mod.load_model
-
-    def patched_load_model(model_name):
-        import torch
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if model_name == 'paraphrase-MiniLM-L6-v2' and os.path.exists(local_minilm):
-            from sentence_transformers import SentenceTransformer
-            print(f"📦 [补丁] 使用本地 embedding: {local_minilm}")
-            return SentenceTransformer(local_minilm, device=device)
-        if model_name == 'Twitter/twhin-bert-base' and os.path.exists(local_twhin):
-            tokenizer = patched_get_twhin_tokenizer()
-            model = patched_get_twhin_model(device)
-            return tokenizer, model
-        return _orig_load_model(model_name)
-
-    _recsys_mod.load_model = patched_load_model
-
-    print("✅ 补丁生效：所有模型从本地加载，无需联网")
 
 
 def load_topics(csv_path: str, field: str = "") -> List[str]:
@@ -418,21 +318,17 @@ async def main():
     parser = argparse.ArgumentParser(description="Oasis Agent 社区模拟")
 
     # 模型相关
-    parser.add_argument("--model-path", default=os.environ.get("OASIS_MODEL_PATH", ""),
-                        help="本地模型路径 (vLLM 模式必填，外部 API 模式可省略)")
-    parser.add_argument("--model-name", default=os.environ.get("OASIS_VLLM_MODEL_NAME", ""),
+    parser.add_argument("--model-name", default=os.environ.get("OASIS_MODEL_NAME", ""),
                         help="模型名称，如 gpt-4o-mini / deepseek-chat / qwen-plus")
-    parser.add_argument("--api-url", default=os.environ.get("OASIS_VLLM_URL", "http://localhost:8000/v1"),
-                        help="API 地址 (vLLM/openai-compatible 模式使用)")
+    parser.add_argument("--api-url", default=os.environ.get("OASIS_API_URL", ""),
+                        help="API 地址 (留空则使用平台默认地址)")
     parser.add_argument("--api-key", default=os.environ.get("OASIS_API_KEY", ""),
-                        help="API Key (外部 API 模式必填，也可通过 OASIS_API_KEY 或 OPENAI_API_KEY 设置)")
-    parser.add_argument("--llm-platform", default=os.environ.get("OASIS_LLM_PLATFORM", "vllm"),
+                        help="API Key (必填，也可通过 OASIS_API_KEY 或 OPENAI_API_KEY 设置)")
+    parser.add_argument("--llm-platform", default=os.environ.get("OASIS_LLM_PLATFORM", "openai-compatible"),
                         choices=list(PLATFORM_TYPE_MAP.keys()),
-                        help="LLM 平台类型: vllm(默认), openai, deepseek, qwen, openai-compatible")
+                        help="LLM 平台类型: openai, deepseek, qwen, openai-compatible(默认)")
     parser.add_argument("--temperature", type=float,
                         default=float(os.environ.get("OASIS_MODEL_TEMPERATURE", "0.7")))
-    parser.add_argument("--max-model-len", type=int, default=32768)
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.90)
 
     # 社区配置
     parser.add_argument("--db-path", default=os.environ.get("OASIS_DB_PATH", "./community_simulation.db"))
@@ -493,9 +389,8 @@ async def main():
                              '"api_key":"sk-xxx","name":"Alice","user_name":"alice",'
                              '"persona":"一个热爱科技的年轻人","description":"Tech enthusiast",'
                              '"platform_type":"openai-compatible","temperature":0.7}, ...]')
-    # 保留旧的 HTTP API 模式作为备选
     parser.add_argument("--external-agents", type=str, default="",
-                        help="(备选) 外部 Agent HTTP 端点列表，逗号分隔")
+                        help="外部 Agent HTTP 端点列表，逗号分隔")
     parser.add_argument("--external-agent-timeout", type=float,
                         default=float(os.environ.get("OASIS_EXTERNAL_AGENT_TIMEOUT", "30")),
                         help="外部 Agent HTTP 调用超时 (秒)")
@@ -505,7 +400,6 @@ async def main():
                         default=os.environ.get("OASIS_EXTRA_COMMENTS", "") not in ("", "0", "false", "False"))
     parser.add_argument("--show-agent-summary", action="store_true",
                         default=os.environ.get("OASIS_SHOW_AGENT_SUMMARY", "") not in ("", "0", "false", "False"))
-    parser.add_argument("--print-vllm", action="store_true")
     parser.add_argument("--check-only", action="store_true")
 
     # PsySafe 恶意 Agent
@@ -551,34 +445,21 @@ async def main():
             print("❌ --dark-traits 格式错误，需要 6 个 0/1 值，如 '1,1,0,0,1,0'")
             return
 
-    # ── 模型路径 & API Key 解析 ──
-    is_local = args.llm_platform in ("vllm",)
-    is_external = not is_local
-
-    if is_local:
-        model_path = resolve_model_path(args.model_path)
-        if not model_path or not os.path.exists(model_path):
-            print("❌ 未找到本地模型路径。")
-            print("请设置环境变量 OASIS_MODEL_PATH，或传入 --model-path。")
-            return
-    else:
-        model_path = args.model_path  # 外部 API 不需要本地路径
-
-    # API Key: 优先 --api-key / OASIS_API_KEY，其次 OPENAI_API_KEY
+    # ── API Key 解析 ──
     api_key = args.api_key.strip()
     if not api_key:
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if is_external and not api_key:
-        print("❌ 外部 API 模式需要 API Key。")
-        print("请设置 --api-key, 或环境变量 OASIS_API_KEY / OPENAI_API_KEY。")
-        return
     if not api_key:
-        api_key = "EMPTY"  # vLLM 本地模式
+        print("❌ 需要 API Key。")
+        print("请在 .env 文件中设置 OASIS_API_KEY，或使用 --api-key 参数。")
+        return
 
-    if args.print_vllm and is_local:
-        print_vllm_command(model_path, args.api_url, args.max_model_len, args.gpu_memory_utilization)
-        if args.check_only:
-            return
+    # ── 同步 Key 给嵌入模型 (camel OpenAIEmbedding 读取 OPENAI_API_KEY) ──
+    embedding_api_key = os.environ.get("OASIS_EMBEDDING_API_KEY", "").strip() or api_key
+    os.environ["OPENAI_API_KEY"] = embedding_api_key
+    embedding_api_url = os.environ.get("OASIS_EMBEDDING_API_URL", "").strip()
+    if embedding_api_url:
+        os.environ["OPENAI_API_BASE_URL"] = embedding_api_url
 
     if args.check_only:
         print("✅ 检查完成。")
@@ -595,25 +476,16 @@ async def main():
     from oasis.environment.env_action import ExternalAction
     from oasis.scheduling import AgentSchedule, ScheduleError
 
-    apply_offline_patches(oasis, use_personalized_recsys=args.personalized_recsys)
-
-    model_type = args.model_name.strip() if args.model_name.strip() else model_path
-    if is_external and not model_type:
-        print("❌ 外部 API 模式需要指定 --model-name (如 gpt-4o-mini, deepseek-chat, qwen-plus)。")
+    model_type = args.model_name.strip()
+    if not model_type:
+        print("❌ 需要指定 --model-name (如 gpt-4o-mini, deepseek-chat, qwen-plus)。")
         return
 
-    # 确定实际 api_url：外部平台未显式指定时不传 url，让 camel 用平台默认值
-    DEFAULT_VLLM_URL = "http://localhost:8000/v1"
-    effective_api_url = args.api_url
-    if is_external and effective_api_url == DEFAULT_VLLM_URL:
-        effective_api_url = ""  # 未显式指定，不覆盖平台默认 URL
+    effective_api_url = args.api_url.strip()
 
     platform_label = args.llm_platform.upper()
-    if is_local:
-        print(f"📦 连接模型: {model_path} ({platform_label})")
-    else:
-        url_info = f" @ {effective_api_url}" if effective_api_url else ""
-        print(f"📦 连接外部 API: {model_type} ({platform_label}{url_info})")
+    url_info = f" @ {effective_api_url}" if effective_api_url else ""
+    print(f"📦 连接外部 API: {model_type} ({platform_label}{url_info})")
     try:
         model = await create_model(
             model_type=model_type,
@@ -641,10 +513,7 @@ async def main():
 
     recsys_type = args.recsys_type.strip()
     if not recsys_type:
-        if is_external:
-            recsys_type = "random"  # 外部 API 模式用随机推荐，无需本地嵌入模型
-        else:
-            recsys_type = "reddit" if args.platform == "reddit" else "twitter"
+        recsys_type = "random"
 
     agent_graph = AgentGraph()
     agents = []
@@ -751,7 +620,7 @@ async def main():
     print("✅ 环境准备就绪")
 
     # ── 注册外部 Agent (OpenAI 兼容模式) ──
-    external_agent_map = {}  # agent_id -> endpoint  (仅 HTTP 备选模式)
+    external_agent_map = {}  # agent_id -> endpoint
     if args.external_agents_config:
         import json as _json
         config_path = args.external_agents_config
@@ -817,7 +686,7 @@ async def main():
                     agent_graph.add_edge(ext_idx, j)
         print(f"✅ {len(ext_configs)} 个外部 Agent 注册完成 (走 LLMAction 路径)")
 
-    # ── 注册外部 Agent (HTTP API 备选模式) ──
+    # ── 注册外部 Agent (HTTP API 模式) ──
     elif args.external_agents:
         endpoints = [e.strip() for e in args.external_agents.split(",") if e.strip()]
         if endpoints:

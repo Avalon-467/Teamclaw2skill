@@ -53,8 +53,6 @@ class SocialEnvironment(Environment):
         "posts content. Do not limit your action in just `like` to like posts")
 
     # ── prompt 大小控制 ──
-    # vLLM max-model-len=65536, system prompt + tools + memory 约占 8k-12k tokens
-    # env_prompt 控制在 ~40k tokens 以内即可
     MAX_PROMPT_CHARS = 40000 * 2       # ~40k tokens
     MAX_POST_CONTENT_CHARS = 500       # 单条帖子内容截断（恢复原值）
     MAX_COMMENT_CONTENT_CHARS = 200    # 单条评论内容截断（恢复原值）

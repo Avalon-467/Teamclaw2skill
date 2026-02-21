@@ -47,7 +47,7 @@ Ask or infer the following from the user:
 | `num_agents` | Total number of agents (including external) | `6` |
 | `rounds` | Number of simulation rounds | `3` |
 | `external_agents` | Whether to include external agents (e.g. TimeBot) | `false` |
-| `llm_platform` | LLM platform: `openai` / `deepseek` / `qwen` / `vllm` / `openai-compatible` | `openai-compatible` |
+| `llm_platform` | LLM platform: `openai` / `deepseek` / `qwen` / `openai-compatible` | `openai-compatible` |
 | `model_name` | Model identifier | (from env) |
 | `api_url` | API endpoint | (from env) |
 | `refresh_rec_post_count` | 每次 refresh 从推荐表采样的帖子数 | Twitter: `2`, Reddit: `5` |
@@ -187,45 +187,79 @@ plan:
 
 > **最佳实践**: 使用 `manual` 设置话题时，**必须**加 `--topics-num 0` 关闭 CSV 话题注入，可省略 `--initial-post` 参数或设为空字符串，避免无关话题干扰讨论焦点。
 
-### Step 4 — Launch Simulation
+### Step 4 — Configure `.env` and Launch via `run_external_api.sh`
+
+使用 `run_external_api.sh` 一键启动，它会**自动安装依赖**（通过 uv）并从 `.env` 读取所有配置。
+
+**4.1 — 确保 `.env` 存在**
+
+如果项目根目录没有 `.env`，从模板创建：
 
 ```bash
-# 在项目根目录下运行（cd 到 clone 下来的 oasis 目录）
-python community_simulation.py \
-  --num-agents <NUM> \
-  --rounds <ROUNDS> \
-  --schedule <PATH_TO_YAML> \
-  --initial-post "<TOPIC>" \
-  --llm-platform <PLATFORM> \
-  --model-name <MODEL> \
-  --api-url <URL> \
-  --api-key <KEY> \
-  --topics-num 0 \
-  [--external-agents-config <JSON_PATH>] \
-  [--temperature 0.7] \
-  [--refresh-rec-post-count <N>] \
-  [--max-rec-post-len <N>] \
-  [--following-post-count <N>]
+cp .env.example .env
 ```
 
-**Key CLI flags:**
+**4.2 — 在 `.env` 中设置讨论参数**
 
-| Flag | Required | Description |
-|------|----------|-------------|
-| `--schedule` | Yes (for this skill) | Path to the YAML schedule file |
-| `--external-agents-config` | If using external agents | Path to external agent JSON |
-| `--num-agents` | Yes | Must match the agent count in the YAML |
-| `--rounds` | Yes | Number of discussion rounds |
-| `--initial-post` | Recommended | The discussion topic / opening message |
-| `--platform` | No | `twitter` (default) or `reddit` |
-| `--topics-num` | **默认 `0`** | **关闭 CSV 无关话题注入**，避免干扰讨论焦点。如需额外话题可设为 >0 |
-| `--refresh-rec-post-count` | No | 从推荐表采样帖子数 (Agent 少时建议调大, 如 5~10) |
-| `--max-rec-post-len` | No | 推荐表每人缓存上限 (应 ≥ refresh 值) |
-| `--following-post-count` | No | 关注者帖子数 (Agent 少时建议调大, 如 5~10) |
+根据前面步骤的结果，更新 `.env` 中的以下字段：
 
-> **重要**: 默认使用 `--topics-num 0` 关闭 CSV 话题注入。OASIS 内置的 CSV 话题（新闻、热搜等）会严重干扰结构化讨论的焦点。话题应通过 YAML `manual` 指令或 `--initial-post` 来设置。
+```bash
+# 必填 — LLM 配置
+OASIS_API_KEY=sk-your-key-here
+OASIS_LLM_PLATFORM=deepseek                  # openai / deepseek / qwen / openai-compatible
+OASIS_MODEL_NAME=deepseek-chat
 
-> **提示**: Agent 数量 ≤5 时，建议设置 `--refresh-rec-post-count 5 --max-rec-post-len 10 --following-post-count 10`，确保每个 Agent 能看到所有已有帖子。
+# 讨论参数
+OASIS_NUM_AGENTS=6                           # 必须匹配 YAML 中的 Agent 数量
+OASIS_COMMUNITY_ROUNDS=3                     # 讨论轮数
+
+# 讨论编排 (关键)
+OASIS_SCHEDULE=schedules/my_discussion.yaml  # Step 3 生成的 YAML 路径
+OASIS_TOPICS_NUM=0                           # 使用 schedule 时必须设为 0
+OASIS_INITIAL_POST=                          # 使用 manual 注入话题时留空
+
+# Agent 少时 (≤5) 建议调大，确保互相看到帖子
+OASIS_REFRESH_REC_POST_COUNT=5
+OASIS_MAX_REC_POST_LEN=10
+OASIS_FOLLOWING_POST_COUNT=10
+
+# 外部 Agent (如果 Step 2 生成了 JSON)
+OASIS_EXTERNAL_AGENTS_CONFIG=external_agents.json
+```
+
+**4.3 — 启动**
+
+```bash
+bash run_external_api.sh
+```
+
+脚本会自动：
+1. 加载 `.env` 配置
+2. 安装/更新所有 Python 依赖（uv + venv）
+3. 启动可视化前端（如果 `OASIS_VIEWER=true`）
+4. 运行 `community_simulation.py` 并传入所有参数
+
+**`.env` 中讨论相关的完整参数表：**
+
+| 环境变量 | 必填 | 说明 |
+|----------|------|------|
+| `OASIS_API_KEY` | ✅ | LLM API Key |
+| `OASIS_LLM_PLATFORM` | ✅ | 平台: openai / deepseek / qwen / openai-compatible |
+| `OASIS_MODEL_NAME` | ✅ | 模型名称 |
+| `OASIS_API_URL` | 否 | API 地址 (留空用平台默认) |
+| `OASIS_NUM_AGENTS` | ✅ | Agent 数量 (需匹配 YAML) |
+| `OASIS_COMMUNITY_ROUNDS` | ✅ | 讨论轮数 |
+| `OASIS_SCHEDULE` | ✅(skill) | YAML schedule 路径 |
+| `OASIS_TOPICS_NUM` | 推荐 | CSV 话题注入数 (建议 `0`) |
+| `OASIS_INITIAL_POST` | 否 | 初始帖子 (使用 manual 时留空) |
+| `OASIS_REFRESH_REC_POST_COUNT` | 否 | 推荐采样数 (Agent≤5 建议 `5`) |
+| `OASIS_MAX_REC_POST_LEN` | 否 | 推荐缓存上限 (Agent≤5 建议 `10`) |
+| `OASIS_FOLLOWING_POST_COUNT` | 否 | 关注者帖子数 (Agent≤5 建议 `10`) |
+| `OASIS_EXTERNAL_AGENTS_CONFIG` | 否 | 外部 Agent JSON 路径 |
+
+> **重要**: `OASIS_TOPICS_NUM=0` 关闭 CSV 话题注入。OASIS 内置 CSV 话题会干扰结构化讨论焦点。
+
+> **提示**: Agent 数量 ≤5 时，建议设置 `OASIS_REFRESH_REC_POST_COUNT=5`、`OASIS_MAX_REC_POST_LEN=10`、`OASIS_FOLLOWING_POST_COUNT=10`，确保每个 Agent 能看到所有帖子。
 
 ### Step 5 — Monitor and Summarize
 

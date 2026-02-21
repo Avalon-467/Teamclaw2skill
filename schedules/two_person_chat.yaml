@@ -1,0 +1,21 @@
+# 2 人自由讨论
+# Agent 0 发布话题，Agent 1 回应，然后两人交替对话
+
+version: 1
+
+plan:
+  # Agent 0 发布话题
+  - manual:
+      agent: 0
+      action_type: create_post
+      action_args:
+        content: "大家好！今天想讨论一下：AI 技术会如何改变未来的工作方式？欢迎分享你的看法。"
+
+  # Agent 1 回应
+  - llm: { agent: 1 }
+
+  # Agent 0 继续讨论
+  - llm: { agent: 0 }
+
+  # Agent 1 再回应
+  - llm: { agent: 1 }
