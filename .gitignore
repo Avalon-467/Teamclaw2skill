@@ -1,0 +1,165 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+.dmypy.json
+.dmypy/
+
+# Pylint
+pylint.log
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.orig
+
+# macOS files
+.DS_Store
+
+# Docker
+*.log
+.dockerignore
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Models
+models/
+
+# Database files
+*.db
+*.sqlite3
+*.sqlite
+
+tmp
+_psysafe_ref/
+log/
+data/
+
+# ============================================
+# Skill-irrelevant: 原 OASIS 项目文件（不影响 discussion skill 运行）
+# ============================================
+
+# 文档站（mintlify docs）
+docs/
+
+# 原始示例脚本（200+ YAML + Python，非 skill 所需）
+examples/
+
+# 数据生成器（Reddit/Twitter 用户图谱生成）
+generator/
+
+# 可视化分析脚本（论文实验用）
+visualization/
+
+# 单元测试
+test/
+
+# Docker 部署配置
+.container/
+
+# CI/CD
+.github/
+
+# License 模板工具
+licenses/
+
+# 项目宣传素材（banner/wechat/star 等图片和视频）
+assets/
+
+# 原始 README / 贡献指南（非运行必需）
+CONTRIBUTING.md
+
+README_COMMUNITY.md
+
+# 部署/环境脚本（内部服务器路径硬编码，不通用）
+deploy.py
+download_model.sh
+setup_env.sh
+
+# Pre-commit 配置
+.pre-commit-config.yaml
+
+# Poetry lock（太大，用 pyproject.toml 即可）
+poetry.lock
+
+# ============================================
+# 运行时产物
+# ============================================
+community_simulation.db
+*.db
+test_passthrough.json
+schedules/minimal_test.yaml
+
+# 包含 API Key 的配置
+external_agents_minitimebot.json
+
+# CodeBuddy
+.codebuddy/
